@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	v1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -107,29 +106,14 @@ func (p *Proxy) HandleProxy(user *auth.User, w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	userId := user.ID
-	if userId == "" {
-		client, err := p.createTypedClient(user.Token)
-		if err != nil {
-			http.Error(w, "Failed to create k8s client for the authenticated user. Cause: "+err.Error(), http.StatusInternalServerError)
+	userId, err := p.getKubernetesUserUID(r.Context(), user)
+	if err != nil {
+		if errors.Is(err, errMissingUserUID) {
+			http.Error(w, "User must have UID to proceed authorization", http.StatusInternalServerError)
 			return
 		}
-
-		// user id is missing, auth is used that does not support user info propagated, like OpenShift OAuth
-		userInfo, err := client.AuthenticationV1().SelfSubjectReviews().Create(r.Context(), &v1.SelfSubjectReview{}, metav1.CreateOptions{})
-		if err != nil {
-			http.Error(w, "Failed to retrieve the current user info. Cause: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		userId = userInfo.Status.UserInfo.UID
-		if userId == "" {
-			// uid is missing. it must be kube:admin
-			if userInfo.Status.UserInfo.Username != "kube:admin" {
-				http.Error(w, "User must have UID to proceed authorization", http.StatusInternalServerError)
-				return
-			}
-		}
+		http.Error(w, "Failed to retrieve the current user info. Cause: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	client, err := p.createDynamicClient(user.Token)

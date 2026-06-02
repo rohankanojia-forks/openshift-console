@@ -71,10 +71,10 @@ func TestLoginSuccessful(t *testing.T) {
 			name: "developer",
 			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				fmt.Printf("Mock testserver handles: %s\n", r.URL.Path)
-				if r.URL.Path == "/apis/user.openshift.io/v1/users/~" {
+				if r.URL.Path == "/apis/authentication.k8s.io/v1/selfsubjectreviews" {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusOK)
-					w.Write([]byte(`{ "kind": "User", "metadata": { "name": "developer1", "uid": "1234" } }`))
+					w.Write([]byte(`{ "status": { "userInfo": { "username": "developer1", "uid": "1234" } } }`))
 				} else if r.URL.Path == "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews" {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusOK)
@@ -93,10 +93,10 @@ func TestLoginSuccessful(t *testing.T) {
 			name: "clusteradmin",
 			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				fmt.Printf("Mock testserver handles: %s\n", r.URL.Path)
-				if r.URL.Path == "/apis/user.openshift.io/v1/users/~" {
+				if r.URL.Path == "/apis/authentication.k8s.io/v1/selfsubjectreviews" {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusOK)
-					w.Write([]byte(`{ "kind": "User", "metadata": { "name": "clusteradmin1", "uid": "1234" } }`))
+					w.Write([]byte(`{ "status": { "userInfo": { "username": "clusteradmin1", "uid": "1234" } } }`))
 				} else if r.URL.Path == "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews" {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusOK)
@@ -115,10 +115,10 @@ func TestLoginSuccessful(t *testing.T) {
 			name: "kubeadmin",
 			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				fmt.Printf("Mock testserver handles: %s\n", r.URL.Path)
-				if r.URL.Path == "/apis/user.openshift.io/v1/users/~" {
+				if r.URL.Path == "/apis/authentication.k8s.io/v1/selfsubjectreviews" {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusOK)
-					w.Write([]byte(`{ "kind": "User", "metadata": { "name": "kube:admin", "uid": "" } }`))
+					w.Write([]byte(`{ "status": { "userInfo": { "username": "kube:admin", "uid": "" } } }`))
 				} else if r.URL.Path == "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews" {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusOK)
@@ -131,6 +131,32 @@ func TestLoginSuccessful(t *testing.T) {
 			console_auth_login_successes_total{role="cluster-admin"} 0
 			console_auth_login_successes_total{role="developer"} 0
 			console_auth_login_successes_total{role="kubeadmin"} 1
+			`,
+		},
+		{
+			// Regression test for BYO External Authentication where User API is not available
+			// https://redhat.atlassian.net/browse/WTO-399
+			name: "byo-external-auth-clusteradmin",
+			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				fmt.Printf("Mock testserver handles: %s\n", r.URL.Path)
+				if r.URL.Path == "/apis/authentication.k8s.io/v1/selfsubjectreviews" {
+					// SelfSubjectReview is available with BYO External Auth
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					w.Write([]byte(`{ "status": { "userInfo": { "username": "oidc-user@example.com", "uid": "oidc-123" } } }`))
+				} else if r.URL.Path == "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews" {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					w.Write([]byte(`{ "status": { "allowed": true } }`))
+				} else {
+					// All other APIs (including User API) return 404
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}),
+			expectedMetrics: `
+			console_auth_login_successes_total{role="cluster-admin"} 1
+			console_auth_login_successes_total{role="developer"} 0
+			console_auth_login_successes_total{role="kubeadmin"} 0
 			`,
 		},
 	}

@@ -7,20 +7,13 @@ import (
 
 	"github.com/openshift/console/pkg/auth/sessions"
 	"github.com/prometheus/client_golang/prometheus"
+	authnv1 "k8s.io/api/authentication/v1"
 	authv1 "k8s.io/api/authorization/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 )
-
-var userResource = schema.GroupVersionResource{
-	Group:    "user.openshift.io",
-	Version:  "v1",
-	Resource: "users",
-}
 
 type LoginRole string
 
@@ -165,18 +158,25 @@ func (m *Metrics) canGetNamespaces(ctx context.Context, config *rest.Config) (bo
 }
 
 func (m *Metrics) isKubeAdmin(ctx context.Context, config *rest.Config) (bool, error) {
-	client, err := dynamic.NewForConfig(config)
+	client, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		klog.Errorf("Error in auth.metrics isKubeAdmin: %v\n", err)
 		return false, err
 	}
-	userInfo, err := client.Resource(userResource).Get(ctx, "~", metav1.GetOptions{}) // FIXME: fix this for the world where the userapi does not exist
+	// Use SelfSubjectReview instead of User API for compatibility with BYO External Authentication
+	// where the OpenShift User API (user.openshift.io/v1) is not available
+	userInfo, err := client.AuthenticationV1().SelfSubjectReviews().Create(
+		ctx,
+		&authnv1.SelfSubjectReview{},
+		metav1.CreateOptions{},
+	)
 	if err != nil {
 		klog.Errorf("Error in auth.metrics isKubeAdmin: %v\n", err)
 		return false, err
 	}
 
-	isKubeAdmin := userInfo.GetUID() == "" && userInfo.GetName() == "kube:admin"
+	// kube:admin has empty UID and username "kube:admin"
+	isKubeAdmin := userInfo.Status.UserInfo.UID == "" && userInfo.Status.UserInfo.Username == "kube:admin"
 	return isKubeAdmin, nil
 }
 

@@ -119,4 +119,47 @@ describe('useUser', () => {
 
     expect(result.current.displayName).toBe('Test User'); // Should be trimmed
   });
+
+  // Regression test for BYO External Authentication
+  // https://redhat.atlassian.net/browse/WTO-399
+  it('should gracefully handle 404 error when User API is not available (BYO External Auth)', () => {
+    const mockUser = { username: 'oidc-user@example.com', uid: 'oidc-123' };
+    const mock404Error = {
+      response: { status: 404 },
+      message: 'User API not found',
+    };
+
+    mockUseSelector.mockReturnValueOnce(mockUser).mockReturnValueOnce(null);
+
+    // Simulate User API returning 404 (not available with BYO External Auth)
+    mockUseK8sGet.mockReturnValue([null, true, mock404Error]);
+
+    const { result } = renderHook(() => useUser());
+
+    // Should not surface 404 as an error (expected state)
+    expect(result.current.userResourceError).toBeNull();
+    expect(result.current.userResourceLoaded).toBe(true);
+    // Should still have user data from other sources
+    expect(result.current.user).toEqual(mockUser);
+    expect(result.current.username).toBe('oidc-user@example.com');
+    expect(result.current.displayName).toBe('oidc-user@example.com');
+  });
+
+  it('should surface non-404 errors normally', () => {
+    const mockUser = { username: 'testuser@example.com' };
+    const mock500Error = {
+      response: { status: 500 },
+      message: 'Internal server error',
+    };
+
+    mockUseSelector.mockReturnValueOnce(mockUser).mockReturnValueOnce(null);
+
+    mockUseK8sGet.mockReturnValue([null, true, mock500Error]);
+
+    const { result } = renderHook(() => useUser());
+
+    // Non-404 errors should be surfaced
+    expect(result.current.userResourceError).toEqual(mock500Error);
+    expect(result.current.userResourceLoaded).toBe(true);
+  });
 });
